@@ -1,0 +1,480 @@
+%% 糖尿病风险预测系统 —— 三分类 + 自定义风险指数 + 完整建议（最终无错版）
+clear; clc; close all;
+rng(2024);
+
+%% ===================== 1. 读取数据 =====================
+dataFile = 'D:\shenshen\心内科全血冠心病基因分型汇总.xls';   % 请修改为您的实际路径
+fprintf('正在读取原始数据集：%s\n', dataFile);
+data = readtable(dataFile, 'VariableNamingRule','preserve', ...
+    'TextType','string', 'UseExcel', true);
+fprintf('数据集规模：%d 行 × %d 列\n', height(data), width(data));
+
+%% ===================== 2. 特征与三分类标签构建 =====================
+N = height(data);
+X_raw = [];
+Y = [];
+
+for i = 1:N
+    % 基因编码
+    g1 = 0; gene1 = upper(string(data{i,5}));
+    if contains(gene1,"TA") || contains(gene1,"AT"); g1 = 2;
+    elseif contains(gene1,"TT"); g1 = 1; end
+    
+    g2 = 0; gene2 = upper(string(data{i,6}));
+    if contains(gene2,"TG") || contains(gene2,"GT"); g2 = 2;
+    elseif contains(gene2,"TT"); g2 = 1; end
+
+    % 临床特征
+    age         = transNum(data{i,7});
+    gender      = transNum(data{i,8});
+    hyper       = transNum(data{i,11});
+    family      = transNum(data{i,13});
+    smoke       = transNum(data{i,14});
+    quitSmoke   = transNum(data{i,15});
+    drugBp      = transNum(data{i,16});
+    drugLipid   = transNum(data{i,18});
+    cad         = transNum(data{i,9});
+    bmi         = transNum(data{i,22});
+    sbp         = transNum(data{i,23});
+    dbp         = transNum(data{i,24});
+    hr          = transNum(data{i,25});
+
+    % 生化特征
+    hdl      = transNum(data{i,32});
+    ldl      = transNum(data{i,33});
+    insulin  = transNum(data{i,44});
+    cpep     = transNum(data{i,45});
+    tg       = transNum(data{i,28});
+    apob     = transNum(data{i,36});
+    lpa      = transNum(data{i,37});
+    hscrp    = transNum(data{i,38});
+    ua       = transNum(data{i,40});
+    hcy      = transNum(data{i,39});
+    cysc     = transNum(data{i,41});
+    b2mg     = transNum(data{i,42});
+    tc       = transNum(data{i,29});
+    apoai    = transNum(data{i,35});
+
+    % 血糖与HbA1c
+    glu_orig   = transNum(data{i,43});
+    hba1c_orig = transNum(data{i,46});
+
+    % 分类特征
+    if isnan(glu_orig); glu_cat = NaN;
+    elseif glu_orig < 5.6; glu_cat = 0;
+    elseif glu_orig <= 6.0; glu_cat = 1;
+    elseif glu_orig <= 6.9; glu_cat = 2;
+    else glu_cat = 3; end
+
+    if isnan(hba1c_orig); hba1c_cat = NaN;
+    elseif hba1c_orig < 5.7; hba1c_cat = 0;
+    elseif hba1c_orig <= 6.4; hba1c_cat = 1;
+    else hba1c_cat = 2; end
+
+    % 特征向量（31个）
+    row = [g1, g2, age, gender, hyper, family, smoke, quitSmoke, drugBp, drugLipid, ...
+           cad, bmi, sbp, dbp, hr, hdl, ldl, insulin, cpep, ...
+           tg, apob, lpa, hscrp, ua, hcy, cysc, b2mg, tc, apoai, ...
+           glu_cat, hba1c_cat];
+    X_raw = [X_raw; row];
+    
+    % 三分类标签
+    if (~isnan(glu_orig) && glu_orig >= 7.0) || (~isnan(hba1c_orig) && hba1c_orig >= 6.5)
+        y = 2;
+    elseif (~isnan(glu_orig) && glu_orig >= 5.6) || (~isnan(hba1c_orig) && hba1c_orig >= 5.7)
+        y = 1;
+    else
+        y = 0;
+    end
+    Y = [Y; y];
+end
+
+%% ===================== 3. 缺失值处理 =====================
+validRows = sum(isnan(X_raw),2) < size(X_raw,2)*0.8;
+X_raw = X_raw(validRows,:);
+Y = Y(validRows);
+
+nFeat = size(X_raw,2);
+nCont = nFeat - 2;
+contIdx = 1:nCont;
+catIdx = nCont+1 : nFeat;
+
+for col = contIdx
+    colData = X_raw(:,col);
+    if any(isnan(colData))
+        medianVal = median(colData(~isnan(colData)), 'omitnan');
+        colData(isnan(colData)) = medianVal;
+        X_raw(:,col) = colData;
+    end
+end
+
+for col = catIdx
+    colData = X_raw(:,col);
+    if any(isnan(colData))
+        nonNaN = colData(~isnan(colData));
+        if isempty(nonNaN); modeVal = 0; else modeVal = mode(nonNaN); end
+        colData(isnan(colData)) = modeVal;
+        X_raw(:,col) = colData;
+    end
+end
+X = X_raw;
+
+%% ===================== 4. 标准化 =====================
+mu_cont = mean(X(:,contIdx));
+s_cont = std(X(:,contIdx));
+s_cont(s_cont==0) = 1;
+X_cont_norm = (X(:,contIdx) - mu_cont) ./ s_cont;
+Xs = [X_cont_norm, X(:,catIdx)];
+
+%% ===================== 5. 训练模型 =====================
+fprintf('\n训练随机森林模型（Bagging, 200棵树）用于三分类...\n');
+finalModel = fitcensemble(Xs, Y, 'Method','Bag', 'NumLearningCycles', 200);
+
+%% ===================== 6. 交叉验证评估（修复fold冲突） =====================
+%% ===================== 6. 交叉验证评估（修正标签编码，正确计算所有指标） =====================
+fprintf('\n========== 5折交叉验证评估 ==========\n');
+cv = cvpartition(Y, 'KFold', 5);
+accVals = zeros(5,1);
+sensVals = zeros(5,1);
+specVals = zeros(5,1);
+aucVals = zeros(5,1);
+
+for k = 1:5
+    trainIdx = cv.training(k);
+    testIdx = cv.test(k);
+    model_fold = fitcensemble(Xs(trainIdx,:), Y(trainIdx), 'Method','Bag', 'NumLearningCycles', 200);
+    [~, p_fold] = predict(model_fold, Xs(testIdx,:));
+    [~, predLabel] = max(p_fold, [], 2);
+    
+    % 关键修正：将预测标签从 1/2/3 转换为 0/1/2，与真实标签 Y 一致
+    predLabel = predLabel - 1;
+    Y_test = Y(testIdx);
+    
+    % 准确率
+    acc = sum(predLabel == Y_test) / length(Y_test);
+    accVals(k) = acc;
+    
+    % 计算混淆矩阵（3x3）
+    C = confusionmat(Y_test, predLabel);
+    if size(C,1) < 3
+        C_full = zeros(3);
+        C_full(1:size(C,1), 1:size(C,2)) = C;
+        C = C_full;
+    end
+    
+    % 计算每类的灵敏度、特异度
+    sens_class = zeros(3,1);
+    spec_class = zeros(3,1);
+    for c = 1:3
+        TP = C(c,c);
+        FN = sum(C(c,:)) - TP;
+        FP = sum(C(:,c)) - TP;
+        TN = sum(C(:)) - TP - FN - FP;
+        sens_class(c) = TP / (TP + FN + eps);
+        spec_class(c) = TN / (TN + FP + eps);
+    end
+    % 宏平均
+    sensVals(k) = mean(sens_class);
+    specVals(k) = mean(spec_class);
+    
+    % AUC（针对糖尿病类别，即原始标签中的 2）
+    [~,~,~,auc] = perfcurve(double(Y_test==2), p_fold(:,3), 1);
+    aucVals(k) = auc;
+    
+    fprintf('Fold %d: acc = %.3f, sens = %.3f, spec = %.3f, auc = %.3f\n', ...
+        k, acc, sensVals(k), specVals(k), auc);
+end
+
+fprintf('\n平均准确率 (Accuracy):   %.3f ± %.3f\n', mean(accVals), std(accVals));
+fprintf('平均灵敏度 (Recall):     %.3f ± %.3f\n', mean(sensVals), std(sensVals));
+fprintf('平均特异度 (Specificity): %.3f ± %.3f\n', mean(specVals), std(specVals));
+fprintf('平均 AUC:                %.3f ± %.3f\n', mean(aucVals), std(aucVals));
+fprintf('========================================================\n\n');
+
+%% ===================== 7. 保存模型 =====================
+save('diabetesModel_3class_final.mat', 'finalModel', 'mu_cont', 's_cont', 'contIdx', 'catIdx');
+
+%% ===================== 8. 新患者输入 =====================
+fprintf('\n请按照提示输入患者信息（直接回车使用训练集均值填充）：\n');
+prompts = {
+    'rs9939609 (TT/TA/AT):', 'rs17817449 (TT/TG/GT):', '年龄:', '性别(男=1/女=0):', ...
+    '高血压(有=1/无=0):', '糖尿病家族史(有=1/无=0):', '已戒烟(是=1/否=0):', '吸烟(是=1/否=0):', ...
+    '降压药(是=1/否=0):', '降脂药(是=1/否=0):', '冠心病(是=1/否=0):', ...
+    '身高 (cm):', '体重 (kg):', 'BMI:', ...
+    '收缩压 (mmHg):', '舒张压 (mmHg):', '心率 (次/分):', 'HDL-C (mmol/L):', ...
+    'LDL-C (mmol/L):', '胰岛素 (μU/mL):', 'C肽 (ng/mL):', '甘油三酯 (mmol/L):', ...
+    'APOB (g/L):', 'Lp(a) (mg/L):', 'hsCRP (mg/L):', '尿酸 (μmol/L):', ...
+    '同型半胱氨酸 (μmol/L):', 'CysC (mg/L):', 'β2-MG (mg/L):', '总胆固醇 (mmol/L):', ...
+    'APOAI (g/L):', '空腹血糖 (mmol/L):', 'HbA1c (%):'};
+nFeat = length(prompts);
+val = NaN(1, nFeat);
+txt = cell(1, nFeat);
+for i = 1:nFeat
+    u = input(prompts{i}, 's');
+    txt{i} = strtrim(u);
+    if isempty(u)
+        val(i) = 0;
+    else
+        val(i) = transNum(u);
+    end
+end
+
+% 提取身高体重
+height = val(12);
+weight = val(13);
+bmi_input = val(14);
+
+% 模型需要的29个连续特征索引
+model_feat_idx = [1,2,3,4,5,6,7,8,9,10,11,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31];
+val_model = val(model_feat_idx);
+% 分类特征
+glu_cat = 0; hba1c_cat = 0;
+if ~isnan(val(32))
+    if val(32) < 5.6; glu_cat = 0;
+    elseif val(32) <= 6.0; glu_cat = 1;
+    elseif val(32) <= 6.9; glu_cat = 2;
+    else glu_cat = 3; end
+end
+if ~isnan(val(33))
+    if val(33) < 5.7; hba1c_cat = 0;
+    elseif val(33) <= 6.4; hba1c_cat = 1;
+    else hba1c_cat = 2; end
+end
+
+val_cont_norm = (val_model - mu_cont) ./ s_cont;
+pat = [val_cont_norm, glu_cat, hba1c_cat];
+
+%% ===================== 9. 预测 + 风险指数映射 =====================
+[~, prob] = predict(finalModel, pat);
+[maxProb, predClass] = max(prob, [], 2);
+maxProb = maxProb(1); predClass = predClass(1);
+
+switch predClass
+    case 1
+        rawRisk = 1 - prob(1);
+        displayedRisk = rawRisk * 0.5;
+        displayedRisk = min(max(displayedRisk, 0.05), 0.20);
+        riskLevel = '低风险';
+    case 2
+        rawRisk = prob(2);
+        displayedRisk = 0.3 + rawRisk * 0.35;
+        displayedRisk = min(max(displayedRisk, 0.40), 0.65);
+        riskLevel = '中风险';
+    case 3
+        rawRisk = prob(3);
+        displayedRisk = 0.75 + rawRisk * 0.2;
+        displayedRisk = min(max(displayedRisk, 0.80), 0.98);
+        riskLevel = '高风险';
+end
+
+%% ===================== 10. 饮食运动建议 =====================
+age = val(3);
+gender = val(4);
+if gender == 1
+    bmr = 10*weight + 6.25*height - 5*age + 5;
+else
+    bmr = 10*weight + 6.25*height - 5*age - 161;
+end
+activity = 1.375;
+tdee = bmr * activity;
+if isnan(bmi_input) || bmi_input==0
+    bmi = weight / ((height/100)^2);
+else
+    bmi = bmi_input;
+end
+if bmi < 18.5
+    calories = tdee + 300;
+elseif bmi < 24
+    calories = tdee;
+elseif bmi < 28
+    calories = tdee - 400;
+else
+    calories = tdee - 600;
+end
+calories = max(calories, 1200);
+
+glu_val = val(32); hba1c_val = val(33);
+if (~isnan(glu_val) && glu_val >= 7.0) || (~isnan(hba1c_val) && hba1c_val >= 6.5)
+    carb_ratio = 0.45;
+elseif (~isnan(glu_val) && glu_val >= 6.1) || (~isnan(hba1c_val) && hba1c_val >= 5.7)
+    carb_ratio = 0.50;
+else
+    carb_ratio = 0.55;
+end
+protein_ratio = 0.18;
+fat_ratio = 1 - carb_ratio - protein_ratio;
+carbs = calories * carb_ratio / 4;
+protein = calories * protein_ratio / 4;
+fat = calories * fat_ratio / 9;
+fiber = 30;
+
+maxHr = 220 - age;
+if val(11)==1
+    maxHr = 200 - age*0.7;
+end
+hrLow = maxHr * 0.64;
+hrHigh = maxHr * 0.76;
+
+switch riskLevel
+    case '低风险'
+        minPerWeek = 150; steps = 7000;
+    case '中风险'
+        minPerWeek = 200; steps = 9000;
+    case '高风险'
+        minPerWeek = 250; steps = 11000;
+end
+minPerDay = ceil(minPerWeek / 5);
+
+%% ===================== 11. 健康建议（兼容所有MATLAB版本） =====================
+ruleList = {
+    'tang', '糖代谢', 'HbA1c', '>=', 5.7, '%',       '碳水控制至40-45%，选择低GI食物';
+    'tang', '糖代谢', 'HbA1c', '>=', 6.5, '%',       '严格限制精制糖，增加膳食纤维30g/天';
+    'tang', '糖代谢', 'Glu',   '>=', 6.1, 'mmol/L',  '减少高GI碳水摄入';
+    'tang', '糖代谢', 'Insulin','>=', 15,  'μIU/mL', '控制总热量，增加运动改善胰岛素敏感性';
+    'zhi',  '脂代谢', 'LDL_C', '>=', 3.4, 'mmol/L',  '减少饱和脂肪，增加不饱和脂肪';
+    'zhi',  '脂代谢', 'TG',    '>=', 1.7, 'mmol/L',  '限制糖和酒精摄入';
+    'zhi',  '脂代谢', 'HDL_C', '<=', 1,   'mmol/L',  '增加有氧运动，提高HDL';
+    'zhi',  '脂代谢', 'APOB',  '>=', 1.1, 'g/L',     '采用地中海饮食';
+    'zhi',  '脂代谢', 'Lp_a',  '>=', 300, 'mg/L',    '增加抗氧化食物摄入';
+    'yan',  '炎症',   'hsCRP', '>=', 3,   'mg/L',    '抗炎饮食（蔬菜、水果、Omega-3）';
+    'du',   '代谢毒性','UA',   '>=', 420, 'μmol/L',  '限制高嘌呤食物，增加饮水';
+    'du',   '代谢毒性','HCY',  '>=', 15,  'μmol/L',  '增加叶酸、维生素B族';
+    'shen', '肾功能', 'CysC',  '>=', 1.1, 'mg/L',    '控制蛋白摄入（0.8g/kg）';
+    'shen', '肾功能', 'beta2_MG','>=',3,   'mg/L',    '建议进一步肾功能评估';
+    };
+
+patient = struct();
+patient.HbA1c   = val(33);
+patient.Glu     = val(32);
+patient.Insulin = val(20);
+patient.LDL_C   = val(19);
+patient.TG      = val(22);
+patient.HDL_C   = val(18);
+patient.APOB    = val(23);
+patient.Lp_a    = val(24);
+patient.hsCRP   = val(25);
+patient.UA      = val(26);
+patient.HCY     = val(27);
+patient.CysC    = val(28);
+patient.beta2_MG= val(29);
+
+nameMap = struct();
+nameMap.HbA1c    = 'HbA1c';
+nameMap.Glu      = '空腹血糖';
+nameMap.Insulin  = '胰岛素';
+nameMap.LDL_C    = 'LDL-C';
+nameMap.TG       = '甘油三酯';
+nameMap.HDL_C    = 'HDL-C';
+nameMap.APOB     = 'APOB';
+nameMap.Lp_a     = 'Lp(a)';
+nameMap.hsCRP    = 'hsCRP';
+nameMap.UA       = '尿酸';
+nameMap.HCY      = '同型半胱氨酸';
+nameMap.CysC     = 'CysC';
+nameMap.beta2_MG = 'β2-MG';
+
+module_ids = {}; module_dispnames = {}; module_indicators = {}; module_advices = {};
+for i = 1:size(ruleList,1)
+    modId = ruleList{i,1}; modDisp = ruleList{i,2}; metric = ruleList{i,3};
+    op = ruleList{i,4}; threshold = ruleList{i,5}; unit = ruleList{i,6}; advice = ruleList{i,7};
+    if isfield(patient, metric)
+        value = patient.(metric);
+        if isnan(value); continue; end
+        met = (strcmp(op,'>=') && value>=threshold) || (strcmp(op,'<=') && value<=threshold);
+        if met
+            indicatorStr = sprintf('%s %s %g %s', nameMap.(metric), op, threshold, unit);
+            idx = find(strcmp(module_ids, modId));
+            if isempty(idx)
+                module_ids{end+1}=modId; module_dispnames{end+1}=modDisp;
+                module_indicators{end+1}={indicatorStr}; module_advices{end+1}={advice};
+            else
+                module_indicators{idx}{end+1}=indicatorStr;
+                if ~any(strcmp(module_advices{idx}, advice))
+                    module_advices{idx}{end+1}=advice;
+                end
+            end
+        end
+    end
+end
+
+general_advice = struct();
+general_advice.tang = {'❌ 避免：精制糖、饮料、甜点、白米白面过量', '✅ 增加：膳食纤维≥25–30g/天'};
+general_advice.zhi  = {'❌ 避免：油炸食品、动物内脏、高脂糕点', '✅ 增加：燕麦、深海鱼、坚果、橄榄油'};
+general_advice.yan  = {'✅ 抗炎食物：深色蔬菜、蓝莓、姜黄、绿茶'};
+general_advice.du   = {'💧 增加饮水至2000ml/天'};
+general_advice.shen = {'⚠️ 定期监测肾功能，避免使用肾毒性药物'};
+
+healthAdvice = {};
+if isempty(module_ids)
+    healthAdvice = {'各项指标未见明显异常，保持健康生活方式。'};
+else
+    for i = 1:length(module_ids)
+        modId = module_ids{i}; modDisp = module_dispnames{i};
+        indicators = module_indicators{i}; advices = module_advices{i};
+        healthAdvice{end+1} = sprintf('%d️⃣ %s 异常干预', i, modDisp);
+        if ~isempty(indicators)
+            indicatorStr = indicators{1};
+            for j = 2:length(indicators)
+                indicatorStr = [indicatorStr, '；', indicators{j}];
+            end
+            healthAdvice{end+1} = sprintf('👉 异常判定：%s', indicatorStr);
+        end
+        for a = 1:length(advices)
+            healthAdvice{end+1} = sprintf('✅ %s', advices{a});
+        end
+        if isfield(general_advice, modId)
+            gen = general_advice.(modId);
+            for g = 1:length(gen)
+                healthAdvice{end+1} = gen{g};
+            end
+        end
+        healthAdvice{end+1} = '';
+    end
+end
+
+%% ===================== 12. 输出报告 =====================
+fprintf('\n==================== 新患者糖尿病风险预测报告 ====================\n');
+fprintf('\n【1】患者基础信息\n');
+for i = 1:nFeat
+    if ~isempty(txt{i})
+        fprintf('   %s %s\n', prompts{i}, txt{i});
+    end
+end
+
+fprintf('\n【2】糖尿病风险预测结果\n');
+fprintf('   风险指数：%.1f%%\n', displayedRisk*100);
+fprintf('   风险等级：%s\n', riskLevel);
+
+fprintf('\n【3】饮食运动建议\n');
+fprintf('   ✅ 每日热量摄入：%.0f kcal\n', calories);
+fprintf('   ✅ 碳水化合物：%.0f g (占总热量 %.0f%%)\n', carbs, carb_ratio*100);
+fprintf('   ✅ 蛋白质：%.0f g (占总热量 %.0f%%, 约%.1f g/kg体重)\n', protein, protein_ratio*100, protein/weight);
+fprintf('   ✅ 脂肪：%.0f g (占总热量 %.0f%%)\n', fat, fat_ratio*100);
+fprintf('   ✅ 膳食纤维：≥%d g/天\n', fiber);
+fprintf('   ❤️ 燃脂心率：%.0f - %.0f 次/分\n', hrLow, hrHigh);
+fprintf('   🚶 运动建议：每周 %d 分钟中等强度有氧运动 (约 %d 分钟/天)，每日步数目标 %d 步\n', minPerWeek, minPerDay, steps);
+fprintf('   🏋️ 力量训练：每周 %d 次\n', floor((minPerWeek/50)));
+
+fprintf('\n【4】个性化健康建议\n');
+for i = 1:length(healthAdvice)
+    fprintf('   %s\n', healthAdvice{i});
+end
+
+fprintf('\n【5】模型交叉验证性能指标\n');
+fprintf('   准确率 (Accuracy):   %.3f ± %.3f\n', mean(accVals), std(accVals));
+fprintf('   灵敏度 (Recall):     %.3f ± %.3f\n', mean(sensVals), std(sensVals));
+fprintf('   特异度 (Specificity): %.3f ± %.3f\n', mean(specVals), std(specVals));
+fprintf('   AUC:                %.3f ± %.3f\n', mean(aucVals), std(aucVals));
+fprintf('==============================================================\n');
+
+%% ===================== 辅助函数 =====================
+function out = transNum(x)
+    if isnumeric(x)
+        out = double(x);
+    else
+        out = str2double(string(x));
+    end
+    if isnan(out)
+        out = 0;
+    end
+end

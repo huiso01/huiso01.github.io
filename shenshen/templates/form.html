@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>填写信息 - 糖早慧</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #f0f7ff; padding: 20px; }
+        .container { max-width: 1400px; background: white; border-radius: 20px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        h1 { color: #2c6e9e; border-left: 5px solid #2c6e9e; padding-left: 20px; margin-bottom: 30px; }
+        .section-title { background: #e9f0f5; padding: 10px 15px; border-radius: 10px; margin-top: 25px; margin-bottom: 20px; font-weight: bold; color: #1a4d6b; }
+        .form-label { font-weight: 500; }
+        .btn-submit { background: #2c6e9e; border: none; padding: 12px 40px; font-size: 1.2rem; border-radius: 40px; }
+        .hidden-fieldset { display: none; }
+        footer { text-align: center; margin-top: 40px; color: #6c757d; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📝 糖早慧—糖尿病风险管理系统</h1>
+    <p>请根据您选择的资料完整度（选项{{ option }}），填写以下字段。</p>
+    
+    <form action="/predict" method="post">
+        <input type="hidden" name="option" value="{{ option }}">
+        
+        <!-- ========= 基因数据（仅选项3显示） ========= -->
+        <div id="block_gene" {% if option != '3' %}class="hidden-fieldset"{% endif %}>
+            <div class="section-title">🧬 基因数据</div>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">rs9939609 (TT/TA/AT)</label><input type="text" name="rs9939609" class="form-control" placeholder="例: TT"></div>
+                <div class="col-md-6 mb-3"><label class="form-label">rs17817449 (TT/TG/GT)</label><input type="text" name="rs17817449" class="form-control" placeholder="例: TG"></div>
+            </div>
+        </div>
+        
+        <!-- ========= 通用信息（身高、体重，所有选项都显示） ========= -->
+        <div class="section-title">📏 体格数据</div>
+        <div class="row">
+            <div class="col-md-3 mb-3"><label>身高 (cm)</label><input type="number" step="0.1" name="height" class="form-control"></div>
+            <div class="col-md-3 mb-3"><label>体重 (kg)</label><input type="number" step="0.1" name="weight" class="form-control"></div>
+        </div>
+        
+        <!-- 基础信息区块（所有选项都显示） -->
+        <div id="block_basic">
+            <div class="section-title">❤️ 基本情况</div>
+            <div class="row">
+                <div class="col-md-3 mb-3"><label>年龄(岁)</label><input type="number" step="1" name="age" class="form-control"></div>
+                <div class="col-md-3 mb-3"><label>性别(男=1/女=0)</label><input type="number" step="1" name="gender" class="form-control"></div>
+                <div class="col-md-3 mb-3"><label>收缩压(mmHg)</label><input type="number" step="1" name="sbp" class="form-control"></div>
+                <div class="col-md-3 mb-3"><label>舒张压(mmHg)</label><input type="number" step="1" name="dbp" class="form-control"></div>
+                <div class="col-md-3 mb-3"><label>心率(次/分)</label><input type="number" step="1" name="hr" class="form-control"></div>
+            </div>
+        </div>
+        
+        <!-- 生化指标区块（选项2和3显示） -->
+        <div id="block_biochem" {% if option == '1' %}class="hidden-fieldset"{% endif %}>
+            <div class="section-title">🧪 生化指标</div>
+            <div class="row">
+                <div class="col-md-3"><label>HDL-C(mmol/L)</label><input type="number" step="0.01" name="hdl" class="form-control"></div>
+                <div class="col-md-3"><label>LDL-C(mmol/L)</label><input type="number" step="0.01" name="ldl" class="form-control"></div>
+                <div class="col-md-3"><label>胰岛素(μU/mL)</label><input type="number" step="0.1" name="insulin" class="form-control"></div>
+                <div class="col-md-3"><label>C肽(ng/mL)</label><input type="number" step="0.01" name="cpep" class="form-control"></div>
+                <div class="col-md-3"><label>甘油三酯(mmol/L)</label><input type="number" step="0.01" name="tg" class="form-control"></div>
+                <div class="col-md-3"><label>APOB(g/L)</label><input type="number" step="0.01" name="apob" class="form-control"></div>
+                <div class="col-md-3"><label>Lp(a)(mg/L)</label><input type="number" step="1" name="lpa" class="form-control"></div>
+                <div class="col-md-3"><label>hsCRP(mg/L)</label><input type="number" step="0.1" name="hscrp" class="form-control"></div>
+                <div class="col-md-3"><label>尿酸(μmol/L)</label><input type="number" step="1" name="ua" class="form-control"></div>
+                <div class="col-md-3"><label>同型半胱氨酸(μmol/L)</label><input type="number" step="0.1" name="hcy" class="form-control"></div>
+                <div class="col-md-3"><label>CysC(mg/L)</label><input type="number" step="0.01" name="cysc" class="form-control"></div>
+                <div class="col-md-3"><label>β2-MG(mg/L)</label><input type="number" step="0.01" name="b2mg" class="form-control"></div>
+                <div class="col-md-3"><label>总胆固醇(mmol/L)</label><input type="number" step="0.01" name="tc" class="form-control"></div>
+                <div class="col-md-3"><label>APOAI(g/L)</label><input type="number" step="0.01" name="apoai" class="form-control"></div>
+            </div>
+        </div>
+        
+        <!-- 血糖相关区块（选项2和3显示） -->
+        <div id="block_glucose" {% if option == '1' %}class="hidden-fieldset"{% endif %}>
+            <div class="section-title">🩸 血糖关键指标</div>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label>空腹血糖(mmol/L)</label><input type="number" step="0.1" name="glu" class="form-control"></div>
+                <div class="col-md-6 mb-3"><label>HbA1c(%)</label><input type="number" step="0.1" name="hba1c" class="form-control"></div>
+            </div>
+        </div>
+        
+        <!-- 详细临床病史（仅选项3显示） -->
+        <div id="block_clinical" {% if option != '3' %}class="hidden-fieldset"{% endif %}>
+            <div class="section-title">📋 详细临床病史</div>
+            <div class="row">
+                <div class="col-md-3"><label>高血压(1是/0否)</label><input type="number" name="hyper" class="form-control"></div>
+                <div class="col-md-3"><label>糖尿病家族史(1是/0否)</label><input type="number" name="family" class="form-control"></div>
+                <div class="col-md-3"><label>吸烟(1是/0否)</label><input type="number" name="smoke" class="form-control"></div>
+                <div class="col-md-3"><label>已戒烟(1是/0否)</label><input type="number" name="quitSmoke" class="form-control"></div>
+                <div class="col-md-3"><label>降压药(1是/0否)</label><input type="number" name="drugBp" class="form-control"></div>
+                <div class="col-md-3"><label>降脂药(1是/0否)</label><input type="number" name="drugLipid" class="form-control"></div>
+                <div class="col-md-3"><label>冠心病(1是/0否)</label><input type="number" name="cad" class="form-control"></div>
+                <div class="col-md-3"><label>BMI：体重(kg)÷[身高(m)]²</label><input type="number" step="0.1" name="bmi" class="form-control"></div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-4">
+            <button type="submit" class="btn btn-primary btn-submit">🚀 开始风险评估</button>
+            <a href="/select" class="btn btn-outline-secondary ms-3">← 重新选择选项</a>
+        </div>
+    </form>
+    <footer>注：未填写的字段将自动用人群统计值填充，不影响预测流程。</footer>
+</div>
+</body>
+</html>
